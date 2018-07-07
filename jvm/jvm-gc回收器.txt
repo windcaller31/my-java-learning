@@ -1,0 +1,65 @@
+# java垃圾收集器
+
+## 新生代GC器：
+### Serial垃圾收集器：
+  单线程串行垃圾收集器，使用复制算法进行垃圾回收，GC时需要暂停所有用户线程，直到GC完成。
+  注：此处的串行垃圾收集器中的串行意义是指GC过程和用户线程执行过程是串行的，即GC过程中用户线程暂停，用户线程执行是，GC是不执行的。
+
+### ParNew垃圾收集器：
+  多线程串行垃圾收集器，Serial的多线程版本，其它特性同Serial。
+
+### Parallel Scavenge垃圾收集器：
+  类似于ParNew，但是该收集器关注的是cpu的吞吐量（throughput=user-cpu-time/total-cpu），
+  通过参数  -XX:GCTimeRation  和  -XX:MaxGCPauseMillis  来控制吞吐量，是吞吐量优先的收集器，同样使用复制算法进行垃圾回收，
+  GC过程需要暂停所有用户线程。
+
+## 老年代GC器：
+
+### Serial和Parallel Scavenge都有对应的老年代版本：
+  Serial Old和Parallel Old垃圾收集器，它们与新生代的区别在于老年代区域的版本，采用标记-整理算法进行垃圾回收。
+
+### CMS垃圾收集器：
+  Concurrent Mark Sweep收集器，是真正意义上的多线程并行垃圾收集器，CMS在GC过程中的某些阶段用户线程是可以运行的，
+  因此说它是真正意义上的并行垃圾收集器，前面介绍的垃圾收集器在GC过程中都要暂停用户线程，因此，视它们为与用户线程串行执行的垃圾收集器。
+  CMS GC过程分四步完成：
+    GC roots:不收集的对象
+    a.初始标记：只是标记一下GC Roots能直接关联的对象，速度很快，仍然需要暂停所有的工作线程。
+    b.并发标记：进行GC Roots跟踪的过程，和用户线程一起工作，不需要暂停工作线程。
+    c.重新标记：为了修正在并发标记期间，因用户程序继续运行而导致标记产生变动的那一部分对象的标记记录，仍然需要暂停所有的工作线程。
+    d.并发清除：清除GC Roots不可达对象，和用户线程一起工作，不需要暂停工作线程。
+
+# java对象的内存分配位置
+  TLAB : 线程缓存区
+  1) 编译器通过逃逸分析，确定对象是在栈上分配还是在堆上分配。如果是在堆上分配，则进入选项2.
+  2) 如果tlab_top + size <= tlab_end，则在在TLAB上直接分配对象并增加tlab_top 的值，如果现有的TLAB不足以存放当前对象则3.
+  3) 重新申请一个TLAB，并再次尝试存放当前对象。如果放不下，则4.
+  4) 在Eden区加锁（这个区是多线程共享的），如果eden_top + size <= eden_end则将对象存放在Eden区，增加eden_top 的值，
+     如果Eden区不足以存放，则5.执行一次Young GC（minor collection）。
+  5) 经过Young GC之后，如果Eden区任然不足以存放当前对象，则直接分配到老年代。
+  其实是触发young GC 清理掉TLAB
+
+# java TLAB
+  JVM在内存新生代Eden Space中开辟了一小块线程私有的区域，称作TLAB（Thread-local allocation buffer）。
+  默认设定为占用Eden Space的1%。在Java程序中很多对象都是小对象且用过即丢，它们不存在线程共享也适合被快速GC，
+  所以对于小对象通常JVM会优先分配在TLAB上，并且TLAB上的分配由于是线程私有所以没有锁开销。
+  因此在实践中分配多个小对象的效率通常比分配一个大对象的效率要高。
+  也就是说，Java中每个线程都会有自己的缓冲区称作TLAB（Thread-local allocation buffer），每个TLAB都只有一个线程可以操作，
+  TLAB结合bump-the-pointer技术可以实现快速的对象分配，而不需要任何的锁进行同步，也就是说，在对象分配的时候不用锁住整个堆，
+  而只需要在自己的缓冲区分配即可。
+
+# java 何时触发GC
+  eden或old gen空间不足时会发出minor gc或full gc。
+
+  1) new gen对象什么时候会晋升到old gen中？
+    1. 多次minor gc后依然存活的对象，在存活年龄超过 MaxTenuringThreshold 阈值时会晋升到old gen中。
+    2. 在创建大对象/数组时，如果设置了 PretenureSizeThreshold ，超过大小的对象会直接在 old gen 中分配内存。
+    注：大对象直接进入老年代
+
+  2) 什么时候会出现old gen空间不足（old gen空间不足时，会触发full gc）？以及full gc触发条件
+    1. 创建大对象，大数组时，如果设置了 PretenureSizeThreshold，超过阈值会直接在 old gen 中分配内存，此时可能会出现 old gen 内存不足。
+    2. minor gc完成后，可能会有对象满足了MaxTenuringThreshold设置的晋升年龄，需要晋升到old gen，此时可能会出现old gen内存不足。
+    3. 如果设置了新生代收集担保机制即HandlePromotionFailure关闭，则会在old gen中预留edu+survivor大小的空间作为担保，如果minor gc时，
+    old gen无法提供足够内存进行担保，会出现old gen内存不足。
+    4. 调用System.gc()时，会建议jvm进行full gc，但是并不保证一定会进行，大多数情况会执行full gc。因此，要慎用System.gc()，因为full gc
+    比较耗时，增加full gc次数会严重影响程序执行效率。-XX:+DisableExplicitGC可以关闭System.gc()调用。
+    5. perm gen内存不足时，也会出发full gc。
