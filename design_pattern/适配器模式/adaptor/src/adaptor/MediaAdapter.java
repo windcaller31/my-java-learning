@@ -12,6 +12,7 @@ public class MediaAdapter implements MediaPlayer {
 	}
 
 	//实现适配器通用方法达到适配新的类型的模式
+	//核心方法，adapter的方法包括了两个实现类的具体方法，将多个实现类的方法，由一个控制方法暴露出去
 	public void playFile(String audioType,String fileName){
 		if(audioType.equals("vlc")){
 			vedioMediaPlayer.playVlc(fileName);

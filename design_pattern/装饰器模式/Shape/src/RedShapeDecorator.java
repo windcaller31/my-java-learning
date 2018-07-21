@@ -7,6 +7,7 @@ public class RedShapeDecorator extends ShapeDecorator {
 	}
 
 	//先调用原始shape的方法
+	//核心方法，相当于重写接口，加上自己想要的功能 ；主要用于增强实现方法，加入更多方法的功能
 	public void draw() {
 		decoratedShape.draw();
 		//装饰自己的方法
